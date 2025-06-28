@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Geocoding Batch App</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- SheetJS CDN for reading Excel files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 1200px; /* Increased max-width for better table viewing */
+        }
+        /* Custom styles for the message box */
+        .message-box {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            white-space: nowrap; /* Prevent message from wrapping too much */
+        }
+        .message-box.show {
+            opacity: 1;
+        }
+        /* Styling for the table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 12px 15px;
+            text-align: left;
+        }
+        th {
+            background-color: #edf2f7;
+            font-weight: 600;
+            color: #4a5568;
+        }
+        tr:nth-child(even) {
+            background-color: #f7fafc;
+        }
+        .file-input-label {
+            display: block;
+            width: 100%;
+            padding: 12px 20px;
+            background-color: #cbd5e0; /* Gray-300 */
+            color: #2d3748; /* Gray-800 */
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+            border: 2px dashed transparent; /* Add dashed border for drag effect */
+        }
+        .file-input-label:hover {
+            background-color: #a0aec0; /* Gray-400 */
+        }
+        .file-input-label.drag-over {
+            border-color: #4c85ee; /* Blue border on drag over */
+            background-color: #e0eaff; /* Lighter blue background */
+        }
+        /* Progress bar styles */
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            height: 25px; /* Height of the bar */
+            margin-top: 10px;
+        }
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #4c85ee; /* Blue */
+            border-radius: 8px;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            line-height: 25px; /* Vertically center text */
+            transition: width 0.1s ease-in-out; /* Smooth transition for width change */
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="container bg-white p-8 rounded-lg shadow-xl w-full">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-8">Batch Address Geocoding App (South Africa Localized)</h1>
+
+        <div class="space-y-6">
+            <div>
+                <label for="apiKeyInput" class="block text-sm font-medium text-gray-700 mb-2">Google API Key:</label>
+                <input type="password" id="apiKeyInput" placeholder="Enter your Google API Key"
+                       class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                <p class="mt-2 text-xs text-gray-500">
+                    <a href="https://developers.google.com/maps/documentation/embed/get-api-key" target="_blank" class="text-blue-600 hover:underline">
+                        Get your API Key here
+                    </a> (Ensure Geocoding API is enabled)
+                </p>
+            </div>
+
+            <div>
+                <label for="addressFile" class="block text-sm font-medium text-gray-700 mb-2">Upload Address File (.csv or .xlsx):</label>
+                <label id="dropZoneLabel" for="addressFile" class="file-input-label">
+                    <span id="fileName">Select File or Drag & Drop Here...</span>
+                </label>
+                <input type="file" id="addressFile" accept=".csv,.xlsx" class="hidden">
+            </div>
+
+            <div id="addressColumnSelection" class="hidden">
+                <label for="addressColumnSelect" class="block text-sm font-medium text-gray-700 mb-2">Select Address Column:</label>
+                <select id="addressColumnSelect"
+                        class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    <option value="">-- Please select an address column --</option>
+                </select>
+                <p class="mt-2 text-xs text-gray-500">
+                    Choose the column in your file that contains the addresses to be geocoded.
+                </p>
+            </div>
+
+            <button id="processButton"
+                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition ease-in-out duration-150 hidden">
+                Process Addresses
+            </button>
+
+            <button id="cancelButton"
+                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition ease-in-out duration-150 hidden">
+                Cancel Process
+            </button>
+        </div>
+
+        <div id="loadingIndicator" class="hidden text-center mt-6 text-blue-600 font-medium">
+            <p id="progressText">Processing...</p>
+            <p id="timeEstimateText" class="text-sm mt-2"></p> <!-- New element for time estimate -->
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+        </div>
+
+        <div id="resultsContainer" class="mt-8 hidden">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Geocoding Results:</h2>
+            <div class="overflow-x-auto rounded-lg shadow-md">
+                <table id="resultsTable" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50" id="resultsTableHeader">
+                        <!-- Headers will be injected here -->
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="resultsTableBody">
+                        <!-- Results will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+            <button id="downloadCsvButton"
+                    class="mt-6 flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition ease-in-out duration-150">
+                Download Results as CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- Message Box for notifications -->
+    <div id="messageBox" class="message-box"></div>
+
+    <script>
+        // Removed hardcoded API Key
+        // const GOOGLE_API_KEY = "YOUR_API_KEY_HERE"; // This line is removed
+
+        const apiKeyInput = document.getElementById('apiKeyInput'); // New reference for API key input
+        const addressFile = document.getElementById('addressFile');
+        const fileNameSpan = document.getElementById('fileName');
+        const dropZoneLabel = document.getElementById('dropZoneLabel');
+        const addressColumnSelection = document.getElementById('addressColumnSelection');
+        const addressColumnSelect = document.getElementById('addressColumnSelect');
+        const processButton = document.getElementById('processButton');
+        const cancelButton = document.getElementById('cancelButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const progressText = document.getElementById('progressText');
+        const timeEstimateText = document.getElementById('timeEstimateText');
+        const progressBar = document.getElementById('progressBar');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const resultsTableHeader = document.getElementById('resultsTableHeader');
+        const resultsTableBody = document.getElementById('resultsTableBody');
+        const downloadCsvButton = document.getElementById('downloadCsvButton');
+        const messageBox = document.getElementById('messageBox');
+
+        let originalHeaders = [];
+        let geocodedData = [];
+        let allOutputHeaders = [];
+        let isProcessingCancelled = false;
+        let processingStartTime = 0;
+
+        /**
+         * Displays a temporary message box at the top of the screen.
+         * @param {string} message The message to display.
+         * @param {string} type The type of message (e.g., 'error', 'success').
+         */
+        function showMessage(message, type = 'info') {
+            messageBox.textContent = message;
+            messageBox.className = 'message-box show';
+            if (type === 'error') {
+                messageBox.style.backgroundColor = '#dc2626'; // Red
+            } else if (type === 'success') {
+                messageBox.style.backgroundColor = '#16a34a'; // Green
+            } else if (type === 'warning') {
+                messageBox.style.backgroundColor = '#fbbf24'; // Yellow
+            } else {
+                messageBox.style.backgroundColor = '#333'; // Default dark
+            }
+
+            setTimeout(() => {
+                messageBox.classList.remove('show');
+            }, 3000);
+        }
+
+        /**
+         * Converts milliseconds to a human-readable time format (e.g., "2m 30s").
+         * @param {number} ms Milliseconds.
+         * @returns {string} Formatted time string.
+         */
+        function formatTime(ms) {
+            if (ms < 0) return "N/A";
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+
+            if (minutes > 0) {
+                return `${minutes}m ${remainingSeconds}s`;
+            } else {
+                return `${remainingSeconds}s`;
+            }
+        }
+
+        /**
+         * Updates the progress bar and text, including time estimate.
+         * @param {number} processed The number of items processed.
+         * @param {number} total The total number of items.
+         * @param {string} phase The current phase (e.g., 'reading', 'geocoding').
+         */
+        function updateProgressBar(processed, total, phase) {
+            const percentage = total === 0 ? 0 : Math.round((processed / total) * 100);
+            progressBar.style.width = `${percentage}%`;
+            progressBar.textContent = `${percentage}%`;
+            progressText.textContent = `${phase}... (${processed}/${total} addresses processed)`;
+
+            if (phase.includes('Geocoding') && processed > 0 && processingStartTime > 0) {
+                const currentTime = performance.now();
+                const elapsedTime = currentTime - processingStartTime;
+                const avgTimePerAddress = elapsedTime / processed;
+                const remainingAddresses = total - processed;
+                const estimatedRemainingTime = avgTimePerAddress * remainingAddresses;
+
+                timeEstimateText.textContent = `Estimated time remaining: ${formatTime(estimatedRemainingTime)}`;
+            } else {
+                timeEstimateText.textContent = '';
+            }
+        }
+
+        /**
+         * Resets the UI elements to their initial state.
+         */
+        function resetUI() {
+            loadingIndicator.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            resultsTableBody.innerHTML = '';
+            resultsTableHeader.innerHTML = '';
+            geocodedData = [];
+            originalHeaders = [];
+            allOutputHeaders = [];
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressText.textContent = 'Processing...';
+            timeEstimateText.textContent = '';
+            processButton.classList.add('hidden');
+            processButton.disabled = false;
+            cancelButton.classList.add('hidden');
+            fileNameSpan.textContent = 'Select File or Drag & Drop Here...';
+            addressColumnSelection.classList.add('hidden');
+            addressColumnSelect.innerHTML = '<option value="">-- Please select an address column --</option>';
+            addressFile.value = '';
+            apiKeyInput.value = ''; // Clear the API key input field on reset
+            processingStartTime = 0;
+        }
+
+        /**
+         * Handles file processing after a file is selected (either by browse or drag-drop).
+         * @param {File} file The file object to process.
+         */
+        async function handleFile(file) {
+            resultsContainer.classList.add('hidden');
+            resultsTableBody.innerHTML = '';
+            resultsTableHeader.innerHTML = '';
+            geocodedData = [];
+            originalHeaders = [];
+            allOutputHeaders = [];
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressText.textContent = 'Processing...';
+            timeEstimateText.textContent = '';
+            processButton.classList.add('hidden');
+            processButton.disabled = false;
+            cancelButton.classList.add('hidden');
+            addressColumnSelection.classList.add('hidden');
+            addressColumnSelect.innerHTML = '<option value="">-- Please select an address column --</option>';
+            processingStartTime = 0;
+
+            fileNameSpan.textContent = file.name;
+
+            const fileExtension = file.name.split('.').pop().toLowerCase();
+            let parseFunction;
+            let fileReaderMethod;
+
+            if (fileExtension === 'csv') {
+                parseFunction = parseCSV;
+                fileReaderMethod = 'readAsText';
+            } else if (fileExtension === 'xlsx') {
+                parseFunction = parseXLSX;
+                fileReaderMethod = 'readAsBinaryString';
+            } else {
+                showMessage('Unsupported file type. Please upload a .csv or .xlsx file.', 'error');
+                resetUI();
+                return;
+            }
+
+            loadingIndicator.classList.remove('hidden');
+            updateProgressBar(0, 1, `Reading headers from ${fileExtension.toUpperCase()} file`);
+
+            try {
+                const reader = new FileReader();
+                const fileContent = await new Promise((resolve, reject) => {
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.onerror = (e) => reject(new Error("Error reading file for headers: " + e.target.error.message));
+                    if (fileReaderMethod === 'readAsText') {
+                        reader.readAsText(file);
+                    } else {
+                        reader.readAsBinaryString(file);
+                    }
+                });
+
+                const { headers } = parseFunction(fileContent);
+                originalHeaders = headers;
+
+                if (originalHeaders.length > 0) {
+                    addressColumnSelect.innerHTML = '<option value="">-- Please select an address column --</option>';
+                    originalHeaders.forEach(header => {
+                        const option = document.createElement('option');
+                        option.value = header;
+                        option.textContent = header;
+                        addressColumnSelect.appendChild(option);
+                    });
+                    addressColumnSelection.classList.remove('hidden');
+                } else {
+                    showMessage('Could not read headers from the file. Please check file format or if it\'s empty.', 'error');
+                    addressColumnSelection.classList.add('hidden');
+                }
+                loadingIndicator.classList.add('hidden');
+            } catch (error) {
+                console.error('Error reading headers:', error);
+                showMessage(`Error reading headers: ${error.message}`, 'error');
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        addressFile.addEventListener('change', (event) => {
+            if (event.target.files.length > 0) {
+                handleFile(event.target.files[0]);
+            } else {
+                resetUI();
+            }
+        });
+
+        dropZoneLabel.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropZoneLabel.classList.add('drag-over');
+        });
+
+        dropZoneLabel.addEventListener('dragleave', () => {
+            dropZoneLabel.classList.remove('drag-over');
+        });
+
+        dropZoneLabel.addEventListener('drop', (event) => {
+            event.preventDefault();
+            dropZoneLabel.classList.remove('drag-over');
+
+            if (event.dataTransfer.files.length > 0) {
+                addressFile.files = event.dataTransfer.files;
+                addressFile.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+
+        addressColumnSelect.addEventListener('change', () => {
+            // Only show process button if a file is selected and a column is chosen
+            if (addressColumnSelect.value !== "" && addressFile.files.length > 0) {
+                processButton.classList.remove('hidden');
+            } else {
+                processButton.classList.add('hidden');
+            }
+        });
+
+
+        function parseCSV(csvString) {
+            const lines = csvString.split(/\r?\n/).filter(line => line.trim().length > 0);
+            if (lines.length === 0) return { headers: [], data: [] };
+
+            const rawHeaders = lines[0].split(',').map(h => h.trim());
+            const headers = rawHeaders.map(h => h.replace(/^"|"$/g, '').replace(/""/g, '"'));
+
+            const data = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',').map(v => v.trim());
+                let rowObject = {};
+                headers.forEach((header, index) => {
+                    rowObject[header] = values[index] ? values[index].replace(/^"|"$/g, '').replace(/""/g, '"') : '';
+                });
+                data.push(rowObject);
+            }
+            return { headers, data };
+        }
+
+        function parseXLSX(binaryString) {
+            const workbook = XLSX.read(binaryString, { type: 'binary' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+
+            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            if (json.length === 0) return { headers: [], data: [] };
+
+            const rawHeaders = json[0];
+            const headers = rawHeaders.map(h => String(h).trim());
+
+            const data = [];
+            for (let i = 1; i < json.length; i++) {
+                let rowObject = {};
+                headers.forEach((header, index) => {
+                    rowObject[header] = json[i][index] !== undefined && json[i][index] !== null ? String(json[i][index]).trim() : '';
+                });
+                data.push(rowObject);
+            }
+            return { headers, data };
+        }
+
+        function convertToCsv(dataArray, headersArray) {
+            const csvRows = [];
+            csvRows.push(headersArray.map(header => `"${String(header).replace(/"/g, '""')}"`).join(','));
+
+            for (const row of dataArray) {
+                const values = headersArray.map(header => {
+                    const value = row[header] !== undefined && row[header] !== null ? String(row[header]) : '';
+                    return `"${value.replace(/"/g, '""')}"`;
+                });
+                csvRows.push(values.join(','));
+            }
+            return csvRows.join('\n');
+        }
+
+
+        processButton.addEventListener('click', async () => {
+            const file = addressFile.files[0];
+            const addressColumn = addressColumnSelect.value;
+            const googleApiKey = apiKeyInput.value.trim(); // Get API key from the input field
+
+            if (!googleApiKey) {
+                showMessage('Please enter your Google API Key.', 'error');
+                return;
+            }
+            if (!file) {
+                showMessage('Please select a CSV or XLSX file to upload.', 'error');
+                return;
+            }
+            if (!addressColumn) {
+                showMessage('Please select an address column from the dropdown.', 'error');
+                return;
+            }
+
+            isProcessingCancelled = false;
+            processButton.disabled = true;
+            processButton.classList.add('hidden');
+            cancelButton.classList.remove('hidden');
+
+            loadingIndicator.classList.remove('hidden');
+            resultsContainer.classList.add('hidden');
+            resultsTableBody.innerHTML = '';
+            resultsTableHeader.innerHTML = '';
+            geocodedData = [];
+            originalHeaders = [];
+            allOutputHeaders = [];
+
+
+            const fileExtension = file.name.split('.').pop().toLowerCase();
+            let fileReaderMethod = '';
+            let parseFunction;
+
+            if (fileExtension === 'csv') {
+                fileReaderMethod = 'readAsText';
+                parseFunction = parseCSV;
+            } else if (fileExtension === 'xlsx') {
+                fileReaderMethod = 'readAsBinaryString';
+                parseFunction = parseXLSX;
+            } else {
+                showMessage('Unsupported file type. Please upload a .csv or .xlsx file.', 'error');
+                resetUI();
+                return;
+            }
+
+
+            updateProgressBar(0, 1, `Reading ${fileExtension.toUpperCase()} file`);
+            let parsedFileContent = { headers: [], data: [] };
+            try {
+                const reader = new FileReader();
+                reader.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        updateProgressBar(e.loaded, e.total, `Reading ${fileExtension.toUpperCase()} file`);
+                    }
+                };
+                parsedFileContent = await new Promise((resolve, reject) => {
+                    reader.onload = (e) => resolve(parseFunction(e.target.result));
+                    reader.onerror = (e) => reject(new Error("Error reading file: " + e.target.error.message));
+                    if (fileReaderMethod === 'readAsText') {
+                        reader.readAsText(file);
+                    } else {
+                        reader.readAsBinaryString(file);
+                    }
+                });
+                updateProgressBar(1, 1, `File read complete`);
+            } catch (error) {
+                console.error('File reading error during full parse:', error);
+                showMessage(`File reading error: ${error.message}`, 'error');
+                resetUI();
+                return;
+            }
+
+            const addressesToProcess = parsedFileContent.data;
+            originalHeaders = parsedFileContent.headers;
+
+            if (addressesToProcess.length === 0) {
+                showMessage('The selected file is empty or contains no valid data rows after full parsing.', 'error');
+                resetUI();
+                return;
+            }
+
+            const addressColumnKey = originalHeaders.find(h => h === addressColumn);
+            if (!addressColumnKey) {
+                showMessage(`Error: Selected address column "${addressColumn}" not found in file headers.`, 'error');
+                resetUI();
+                return;
+            }
+
+            const geocodeOutputFields = {
+                'geocoded address': '',
+                'geocoded suburb': '',
+                'geocoded long': '',
+                'geocoded lat': '',
+                'Geocoding Status': ''
+            };
+
+            allOutputHeaders = [...originalHeaders];
+            Object.keys(geocodeOutputFields).forEach(newHeader => {
+                if (!allOutputHeaders.includes(newHeader)) {
+                    allOutputHeaders.push(newHeader);
+                }
+            });
+
+            resultsTableHeader.innerHTML = '';
+            const headerRow = resultsTableHeader.insertRow();
+            allOutputHeaders.forEach(headerText => {
+                const th = document.createElement('th');
+                th.scope = "col";
+                th.className = "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider";
+                th.textContent = headerText;
+                headerRow.appendChild(th);
+            });
+
+            let processedCount = 0;
+            const totalAddresses = addressesToProcess.length;
+            let stoppedDueToError = false;
+
+            processingStartTime = performance.now();
+
+            for (let i = 0; i < totalAddresses; i++) {
+                if (isProcessingCancelled) {
+                    showMessage('Processing cancelled by user.', 'info');
+                    stoppedDueToError = true;
+                    break;
+                }
+
+                const rowData = { ...addressesToProcess[i] };
+                const originalAddressString = rowData[addressColumnKey];
+
+                updateProgressBar(processedCount, totalAddresses, 'Geocoding addresses');
+
+                let formattedAddress = '';
+                let suburb = '';
+                let lat = '';
+                let lng = '';
+                let status = 'Error';
+
+                if (originalAddressString && originalAddressString.trim() !== '') {
+                    try {
+                        const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(originalAddressString)}&region=ZA&language=en-ZA&key=${googleApiKey}`; // Use googleApiKey from input
+                        const response = await fetch(url);
+                        const data = await response.json();
+
+                        if (data.status === 'OK' && data.results.length > 0) {
+                            const result = data.results[0];
+                            formattedAddress = result.formatted_address;
+                            lat = result.geometry.location.lat.toFixed(6);
+                            lng = result.geometry.location.lng.toFixed(6);
+                            status = 'Success';
+
+                            for (const component of result.address_components) {
+                                if (component.types.includes('sublocality_level_1') || component.types.includes('sublocality_level_2')) {
+                                    suburb = component.long_name;
+                                    break;
+                                }
+                                if (component.types.includes('locality')) {
+                                    suburb = component.long_name;
+                                    break;
+                                }
+                            }
+                        } else if (data.status === 'ZERO_RESULTS') {
+                            status = 'No Results Found';
+                        } else if (data.status === 'OVER_QUERY_LIMIT' || data.status === 'REQUEST_DENIED') {
+                            status = `API Error: ${data.error_message || data.status}`;
+                            showMessage(`API Error: ${data.error_message || data.status}. Processing stopped due to API error.`, 'error');
+                            stoppedDueToError = true;
+                            break;
+                        } else {
+                            status = `Unexpected API Status: ${data.status}`;
+                        }
+                    } catch (error) {
+                        console.error('Network or Geocoding API error:', error);
+                        status = `Network Error: ${error.message}`;
+                        showMessage(`Network error for "${originalAddressString}". Continuing...`, 'warning');
+                    }
+                } else {
+                    status = 'No Address Provided';
+                }
+
+                rowData['geocoded address'] = formattedAddress;
+                rowData['geocoded suburb'] = suburb;
+                rowData['geocoded long'] = lng;
+                rowData['geocoded lat'] = lat;
+                rowData['Geocoding Status'] = status;
+
+                geocodedData.push(rowData);
+
+                const rowElement = resultsTableBody.insertRow();
+                allOutputHeaders.forEach(header => {
+                    const cell = rowElement.insertCell();
+                    cell.className = `px-6 py-4 whitespace-${header === 'geocoded address' || header === 'geocoded suburb' ? 'normal' : 'nowrap'} text-sm text-gray-700`;
+                    if (header === 'Geocoding Status') {
+                        cell.classList.add(status === 'Success' ? 'text-green-600' : 'text-red-600');
+                    }
+                    cell.textContent = rowData[header] !== undefined && rowData[header] !== null ? rowData[header] : '';
+                });
+
+                processedCount++;
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            if (!stoppedDueToError && !isProcessingCancelled) {
+                updateProgressBar(totalAddresses, totalAddresses, 'Processing complete');
+                showMessage('Batch geocoding complete!', 'success');
+            } else if (isProcessingCancelled) {
+                updateProgressBar(processedCount, totalAddresses, 'Processing cancelled');
+            } else if (stoppedDueToError) {
+                updateProgressBar(processedCount, totalAddresses, 'Processing stopped (Error)');
+            }
+
+            loadingIndicator.classList.add('hidden');
+            resultsContainer.classList.remove('hidden');
+            processButton.classList.remove('hidden');
+            processButton.disabled = false;
+            cancelButton.classList.add('hidden');
+            timeEstimateText.textContent = '';
+        });
+
+        cancelButton.addEventListener('click', () => {
+            isProcessingCancelled = true;
+            showMessage('Cancelling process...', 'info');
+        });
+
+        downloadCsvButton.addEventListener('click', () => {
+            if (geocodedData.length === 0) {
+                showMessage('No data to download.', 'info');
+                return;
+            }
+
+            const csvString = convertToCsv(geocodedData, allOutputHeaders);
+            const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'geocoded_addresses_output.csv');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showMessage('CSV file downloaded.', 'success');
+        });
+
+        // Initialize UI on load
+        resetUI();
+    </script>
+</body>
+</html>
